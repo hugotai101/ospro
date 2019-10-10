@@ -1,1 +1,1 @@
-gcc part0-Mandelbrot.c -l SDL2 -lm
+gcc part0-mandelbrot.c -l SDL2 -lm
