@@ -4,7 +4,7 @@
  * Date: Oct 31, 2019
  * version: 1.0
  * Development platform: Course VM
- * Compilation: gcc part1a-mandelbrot.c –l SDL2 -lm
+ * Compilation: gcc part1a-mandelbrot.c -l SDL2 -lm
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -61,8 +61,8 @@ int main(int argc, char *args[]) {
             clock_gettime(CLOCK_MONOTONIC, &start_compute);
             printf("Child(%d): Start the computation ...\n", getpid());
             close(tube1[0]);
+            float *temp = (float *) malloc(rowsize);
             for (int j = i; j < IMAGE_HEIGHT; j += number_of_processors) {
-                float *temp = (float *) malloc(rowsize);
                 for (int k = 0; k < IMAGE_WIDTH; ++k) {
                     temp[k + 1] = Mandelbrot(k, j);
                 }
@@ -77,14 +77,10 @@ int main(int argc, char *args[]) {
         }
     }
     close(tube1[1]);
+    float idx;
     for (int i = 0; i < IMAGE_HEIGHT; i++) {
-        float fdx;
-        read(tube1[0], &fdx, sizeof(float));
-        int idx = fdx;
-        read(tube1[0], &pixels[idx * IMAGE_HEIGHT], sizeof(float) * IMAGE_WIDTH);
-    }
-    for (int j = 0; j < number_of_processors; j++) {
-        wait(0);
+        read(tube1[0], &idx, sizeof(float));
+        read(tube1[0], &pixels[(int)idx * IMAGE_HEIGHT], sizeof(float) * IMAGE_WIDTH);
     }
     printf("All Child processes have completed\n");
     clock_gettime(CLOCK_MONOTONIC, &end_compute);
