@@ -15,7 +15,7 @@
 #include <unistd.h>
 #include "Mandel.h"
 #include "draw.h"
-//align to 8-byte boundary
+#define batch_size 40
 int task[2];
 int data[2];
 int i;
@@ -31,22 +31,24 @@ float *pixels;
 
 //pre: Given the start and end time
 //post: return the elapsed time in nanoseconds (stored in 64 bits)
-unsigned long long getns(struct timespec start, struct timespec end)
+float getns(struct timespec start, struct timespec end)
 {
-    return (unsigned long long)(end.tv_sec - start.tv_sec) * 1000000000ULL + (end.tv_nsec - start.tv_nsec);
+    return (end.tv_nsec - start.tv_nsec) / 1000000.0 +
+               (end.tv_sec - start.tv_sec) * 1000.0;
 }
-pid_t children_ids[9];
-int tasks_per_children[9];
-//this is the handler for SIGUSR1. Here the function search(word) is called after reading the word from the task pipe
-//then it writes the answer is put in the modified output type structure along with other useful information like process id and written to the data pipe. It also does the related displays
+pid_t *children_ids;
+int * tasks_per_children;
 void sigusr1_handler(int signum)
 {
     if (signum == SIGUSR1)
     {
+        struct timespec start_compute, end_compute;
+        clock_gettime(CLOCK_MONOTONIC, &start_compute);
+        printf("Child(%d): Start the computation ...\n", getpid());
         int *start_end = (int *) malloc(sizeof(int) * 2);
         read(task[0], start_end, sizeof(int) * 2);
         struct small_set* result;
-        int size_of_result = sizeof *result + 40 * sizeof *result->list;
+        int size_of_result = sizeof *result + batch_size * sizeof *result->list;
         result = malloc(size_of_result);
         int j = 0;
         for (int i = start_end[0]; i < start_end[1]; ++i) {
@@ -57,6 +59,8 @@ void sigusr1_handler(int signum)
         result->low = start_end[0];
         result->high = start_end[1];
         write(data[1], result, size_of_result);
+        clock_gettime(CLOCK_MONOTONIC, &end_compute);
+        printf("Child(%d):... completed. Elapse time = %.3f ms\n", getpid(), getns(start_compute, end_compute));
     }
 }
 //This is the handler for SIGINT, it does the termination and the related display
@@ -64,7 +68,7 @@ void sigint_handler(int signum)
 {
     if (signum == SIGINT)
     {
-        printf("Process %d is interrupted by ^C. Finish all task. Bye Bye\n", (int)getpid());
+        printf("Process %d is interrupted by ^C. Bye Bye\n", (int)getpid());
         exit(0);
     }
 }
@@ -75,14 +79,19 @@ void fill_tasks(int pid, int size)
         if (children_ids[i] == pid)
         {
             tasks_per_children[i]++;
-            break;
+            return;
         }
 }
-int main(int argc, char *argv[])
+int main()
 {
+    // use all the cores
+    int number_of_processors = sysconf(_SC_NPROCESSORS_ONLN);
+    //set up task per children
+    tasks_per_children = calloc(number_of_processors, sizeof(int));
+    children_ids = calloc(number_of_processors, sizeof(int));
     pixels = (float *) malloc(sizeof(float) * IMAGE_WIDTH * IMAGE_HEIGHT);
+
     struct timespec start, end;
-    int children = 8;
     struct sigaction sa;
     pipe(task);
     pipe(data);
@@ -101,7 +110,7 @@ int main(int argc, char *argv[])
     int read_idx = 0;
     int x = 0;
     //making the desired number of children and assigning an initial word to each
-    for (x = 0; x < children; x++)
+    for (x = 0; x < number_of_processors; x++)
     {
         if (master_idx > IMAGE_WIDTH * IMAGE_HEIGHT)
         {
@@ -109,16 +118,15 @@ int main(int argc, char *argv[])
         }
         child_check = fork();
         children_ids[x] = child_check;
-        //write(task[1], &word, MAXLEN*sizeof(char));
         if (child_check < 0)
         {
             printf("error");
         }
         else if (child_check == 0)
         {
+            printf("Child(%d): Start up, Wait for task!\n", getpid());
             while(1)
                 sleep(10);
-            exit(0);
         }
         else
         {
@@ -127,54 +135,55 @@ int main(int argc, char *argv[])
 
                 int *start_end = (int *) malloc (sizeof(int) * 2);
                 start_end[0] = master_idx;
-                start_end[1] = master_idx + 40;
-                int abc = write(task[1], start_end, 2 * sizeof(int));
-                printf("[%d, ]Parent[148]: idx[%d, %d]\n", abc, start_end[0], start_end[1]);
-                master_idx += 40;
+                start_end[1] = master_idx + batch_size;
+                write(task[1], start_end, 2 * sizeof(int));
+                printf("Parent: idx[%d, %d]\n", start_end[0], start_end[1]);
+                master_idx += batch_size;
                 kill(child_check, SIGUSR1);
-                printf("Sent %d\n", child_check);
             }
         }
     }
-    //a while loop to handle further distribution of the tasks to the child processes/workers and collect results as they are produced
-//    while (all_results[line - 1].cid < 0)
+    //while loop for the remaining task
     while (read_idx < IMAGE_WIDTH * IMAGE_HEIGHT)
     {
         struct small_set* temp;
-        int size_of_temp = sizeof *temp + 40 * sizeof *temp->list;
+        int size_of_temp = sizeof *temp + batch_size * sizeof *temp->list;
         temp = malloc(size_of_temp);
-        //printf("Going to read: \n");
         if (read_idx < IMAGE_WIDTH * IMAGE_HEIGHT)
         {
             read(data[0], (void *)&temp[0], size_of_temp);
-            read_idx+=40;
-            for (int j = 0; j < 40; ++j) {
+            read_idx+=batch_size;
+            for (int j = 0; j < batch_size; ++j) {
                 pixels[temp->low + j] = temp->list[j];
             }
         }
-        fill_tasks(temp->cid, children);
+        fill_tasks(temp->cid, number_of_processors);
         if (!all_done)
         {
-            int start_end[2] = {master_idx, master_idx + 40};
-            master_idx += 40;
+            int start_end[2] = {master_idx, master_idx + batch_size};
+            master_idx += batch_size;
             write(task[1], &start_end, 2 * sizeof(int));
             kill(temp->cid, SIGUSR1);
         }
     }
     //sending SIGINT to the workers
-    for (int i = 0; i < children; i++)
+    for (int i = 0; i < number_of_processors; i++)
         kill(children_ids[i], SIGINT);
     //waiting for the workers to terminate
-    for (i = 0; i < children; i++)
+    for (i = 0; i < number_of_processors; i++)
         waitpid(children_ids[i], NULL, 0);
     //displaying which worker did how many tasks
-    for (i = 0; i < children; i++)
+    int super_time = 0;
+    for (i = 0; i < number_of_processors; i++)
+    {
         printf("Child process %d terminated and completed %d tasks\n", children_ids[i], tasks_per_children[i]);
+    }
     //word count display
     clock_gettime(CLOCK_REALTIME, &end);
     //displaying elapsed time
-    printf("\nTotal elapsed time: %.2lf ms\n", getns(start, end) / 1000000.0);
+    printf("Total elapsed time: %.2lf ms\n", getns(start, end) / 1000000.0);
 
     DrawImage(pixels, IMAGE_WIDTH, IMAGE_HEIGHT, "Mandelbrot demo", 10000);
     return 0;
+
 }
