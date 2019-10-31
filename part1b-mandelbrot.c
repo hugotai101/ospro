@@ -6,6 +6,11 @@
  * Development platform: Course VM
  * Compilation: gcc part1b-mandelbrot.c -l SDL2 -lm
  */
+
+#include <sys/times.h>
+#include <time.h>
+#include <sys/wait.h>
+#include <sys/resource.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -18,6 +23,7 @@
 #define batch_size 40
 int task[2];
 int data[2];
+int time_pipe[2];
 int i;
 struct small_set
 {
@@ -58,8 +64,7 @@ void sigusr1_handler(int signum)
         result->cid = (int) getpid();
         result->low = start_end[0];
         result->high = start_end[1];
-        write(data[1], result, size_of_result);
-        clock_gettime(CLOCK_MONOTONIC, &end_compute);
+        write(data[1], result, size_of_result); clock_gettime(CLOCK_MONOTONIC, &end_compute);
         printf("Child(%d):... completed. Elapse time = %.3f ms\n", getpid(), getns(start_compute, end_compute));
     }
 }
@@ -84,6 +89,12 @@ void fill_tasks(int pid, int size)
 }
 int main()
 {
+
+  struct tms t;
+  clock_t dub;
+  int tics_per_second;
+
+  tics_per_second = sysconf(_SC_CLK_TCK);
     // use all the cores
     int number_of_processors = sysconf(_SC_NPROCESSORS_ONLN);
     //set up task per children
@@ -95,6 +106,7 @@ int main()
     struct sigaction sa;
     pipe(task);
     pipe(data);
+    pipe(time_pipe);
     clock_gettime(CLOCK_REALTIME, &start);
     //========installing the above made handlers========
     sigaction(SIGUSR1, NULL, &sa);
@@ -171,19 +183,38 @@ int main()
         kill(children_ids[i], SIGINT);
     //waiting for the workers to terminate
     for (i = 0; i < number_of_processors; i++)
-        waitpid(children_ids[i], NULL, 0);
+    {
+        waitpid(children_ids[i], NULL,WEXITED|WNOWAIT);
+    }
+    for (i = 0; i < number_of_processors; i++)
+    {
+        waitpid(children_ids[i], NULL,0);
+    }
     //displaying which worker did how many tasks
     int super_time = 0;
     for (i = 0; i < number_of_processors; i++)
     {
         printf("Child process %d terminated and completed %d tasks\n", children_ids[i], tasks_per_children[i]);
     }
+    printf("\nAll Child processes have completed\n");
+
     //word count display
     clock_gettime(CLOCK_REALTIME, &end);
     //displaying elapsed time
-    printf("Total elapsed time: %.2lf ms\n", getns(start, end) / 1000000.0);
+    struct rusage *parentusage = (struct rusage *)malloc(sizeof(struct rusage));
+    struct rusage *childusage = (struct rusage *)malloc(sizeof (struct rusage));
+    getrusage (RUSAGE_CHILDREN, childusage);
+    getrusage (RUSAGE_SELF, parentusage);
+    times(&t);
+    printf("Total time spent by all child processes in user mode = %ld ms\n", childusage->ru_utime.tv_usec);
+    printf("Total time spent by all child processes in system mode = %ld ms\n", childusage->ru_stime.tv_usec);
+    printf("Total time spent by parent processes in user mode = %ld ms\n", parentusage->ru_utime.tv_usec);
+    printf("Total time spent by parent processes in system mode = %ld ms\n", parentusage->ru_stime.tv_usec);
 
+	float difftime = (end.tv_nsec - start.tv_nsec)/1000000.0 + (end.tv_sec - start.tv_sec)*1000.0;
+	printf("Total elapse time measured by the process = %.3f ms\n", difftime);
+
+    printf("Draw the image\n");
     DrawImage(pixels, IMAGE_WIDTH, IMAGE_HEIGHT, "Mandelbrot demo", 10000);
     return 0;
-
 }
