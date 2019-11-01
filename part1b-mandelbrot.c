@@ -40,10 +40,10 @@ float *pixels;
 float getns(struct timespec start, struct timespec end)
 {
     return (end.tv_nsec - start.tv_nsec) / 1000000.0 +
-               (end.tv_sec - start.tv_sec) * 1000.0;
+           (end.tv_sec - start.tv_sec) * 1000.0;
 }
 pid_t *children_ids;
-int * tasks_per_children;
+int *tasks_per_children;
 void sigusr1_handler(int signum)
 {
     if (signum == SIGUSR1)
@@ -51,20 +51,22 @@ void sigusr1_handler(int signum)
         struct timespec start_compute, end_compute;
         clock_gettime(CLOCK_MONOTONIC, &start_compute);
         printf("Child(%d): Start the computation ...\n", getpid());
-        int *start_end = (int *) malloc(sizeof(int) * 2);
+        int *start_end = (int *)malloc(sizeof(int) * 2);
         read(task[0], start_end, sizeof(int) * 2);
-        struct small_set* result;
+        struct small_set *result;
         int size_of_result = sizeof *result + batch_size * sizeof *result->list;
         result = malloc(size_of_result);
         int j = 0;
-        for (int i = start_end[0]; i < start_end[1]; ++i) {
+        for (int i = start_end[0]; i < start_end[1]; ++i)
+        {
             result->list[j] = Mandelbrot(i % IMAGE_WIDTH, i / IMAGE_WIDTH);
             j++;
         }
-        result->cid = (int) getpid();
+        result->cid = (int)getpid();
         result->low = start_end[0];
         result->high = start_end[1];
-        write(data[1], result, size_of_result); clock_gettime(CLOCK_MONOTONIC, &end_compute);
+        write(data[1], result, size_of_result);
+        clock_gettime(CLOCK_MONOTONIC, &end_compute);
         printf("Child(%d):... completed. Elapse time = %.3f ms\n", getpid(), getns(start_compute, end_compute));
     }
 }
@@ -90,17 +92,17 @@ void fill_tasks(int pid, int size)
 int main()
 {
 
-  struct tms t;
-  clock_t dub;
-  int tics_per_second;
+    struct tms t;
+    clock_t dub;
+    int tics_per_second;
 
-  tics_per_second = sysconf(_SC_CLK_TCK);
+    tics_per_second = sysconf(_SC_CLK_TCK);
     // use all the cores
     int number_of_processors = sysconf(_SC_NPROCESSORS_ONLN);
     //set up task per children
     tasks_per_children = calloc(number_of_processors, sizeof(int));
     children_ids = calloc(number_of_processors, sizeof(int));
-    pixels = (float *) malloc(sizeof(float) * IMAGE_WIDTH * IMAGE_HEIGHT);
+    pixels = (float *)malloc(sizeof(float) * IMAGE_WIDTH * IMAGE_HEIGHT);
 
     struct timespec start, end;
     struct sigaction sa;
@@ -137,7 +139,7 @@ int main()
         else if (child_check == 0)
         {
             printf("Child(%d): Start up, Wait for task!\n", getpid());
-            while(1)
+            while (1)
                 sleep(10);
         }
         else
@@ -145,7 +147,7 @@ int main()
             if (!all_done)
             {
 
-                int *start_end = (int *) malloc (sizeof(int) * 2);
+                int *start_end = (int *)malloc(sizeof(int) * 2);
                 start_end[0] = master_idx;
                 start_end[1] = master_idx + batch_size;
                 write(task[1], start_end, 2 * sizeof(int));
@@ -158,14 +160,15 @@ int main()
     //while loop for the remaining task
     while (read_idx < IMAGE_WIDTH * IMAGE_HEIGHT)
     {
-        struct small_set* temp;
+        struct small_set *temp;
         int size_of_temp = sizeof *temp + batch_size * sizeof *temp->list;
         temp = malloc(size_of_temp);
         if (read_idx < IMAGE_WIDTH * IMAGE_HEIGHT)
         {
             read(data[0], (void *)&temp[0], size_of_temp);
-            read_idx+=batch_size;
-            for (int j = 0; j < batch_size; ++j) {
+            read_idx += batch_size;
+            for (int j = 0; j < batch_size; ++j)
+            {
                 pixels[temp->low + j] = temp->list[j];
             }
         }
@@ -184,35 +187,38 @@ int main()
     //waiting for the workers to terminate
     for (i = 0; i < number_of_processors; i++)
     {
-        waitpid(children_ids[i], NULL,WEXITED|WNOWAIT);
+        waitpid(children_ids[i], NULL, WEXITED | WNOWAIT);
+        waitpid(children_ids[i], NULL, 0);
     }
     for (i = 0; i < number_of_processors; i++)
     {
-        waitpid(children_ids[i], NULL,0);
     }
     //displaying which worker did how many tasks
     int super_time = 0;
+    int total_task = 0;
     for (i = 0; i < number_of_processors; i++)
     {
         printf("Child process %d terminated and completed %d tasks\n", children_ids[i], tasks_per_children[i]);
+        total_task += tasks_per_children[i];
     }
     printf("\nAll Child processes have completed\n");
+    printf("Total task done: %d\n", total_task);
 
     //word count display
     clock_gettime(CLOCK_REALTIME, &end);
     //displaying elapsed time
     struct rusage *parentusage = (struct rusage *)malloc(sizeof(struct rusage));
-    struct rusage *childusage = (struct rusage *)malloc(sizeof (struct rusage));
-    getrusage (RUSAGE_CHILDREN, childusage);
-    getrusage (RUSAGE_SELF, parentusage);
+    struct rusage *childusage = (struct rusage *)malloc(sizeof(struct rusage));
+    getrusage(RUSAGE_CHILDREN, childusage);
+    getrusage(RUSAGE_SELF, parentusage);
     times(&t);
     printf("Total time spent by all child processes in user mode = %ld ms\n", childusage->ru_utime.tv_usec);
     printf("Total time spent by all child processes in system mode = %ld ms\n", childusage->ru_stime.tv_usec);
     printf("Total time spent by parent processes in user mode = %ld ms\n", parentusage->ru_utime.tv_usec);
     printf("Total time spent by parent processes in system mode = %ld ms\n", parentusage->ru_stime.tv_usec);
 
-	float difftime = (end.tv_nsec - start.tv_nsec)/1000000.0 + (end.tv_sec - start.tv_sec)*1000.0;
-	printf("Total elapse time measured by the process = %.3f ms\n", difftime);
+    float difftime = (end.tv_nsec - start.tv_nsec) / 1000000.0 + (end.tv_sec - start.tv_sec) * 1000.0;
+    printf("Total elapse time measured by the process = %.3f ms\n", difftime);
 
     printf("Draw the image\n");
     DrawImage(pixels, IMAGE_WIDTH, IMAGE_HEIGHT, "Mandelbrot demo", 10000);
