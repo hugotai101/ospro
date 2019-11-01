@@ -207,20 +207,17 @@ int main()
     //word count display
     clock_gettime(CLOCK_REALTIME, &end);
     //displaying elapsed time
-    struct rusage *parentusage = (struct rusage *)malloc(sizeof(struct rusage));
-    struct rusage *childusage = (struct rusage *)malloc(sizeof(struct rusage));
-    getrusage(RUSAGE_CHILDREN, childusage);
-    getrusage(RUSAGE_SELF, parentusage);
-    times(&t);
-    printf("Total time spent by all child processes in user mode = %ld ms\n", childusage->ru_utime.tv_usec);
-    printf("Total time spent by all child processes in system mode = %ld ms\n", childusage->ru_stime.tv_usec);
-    printf("Total time spent by parent processes in user mode = %ld ms\n", parentusage->ru_utime.tv_usec);
-    printf("Total time spent by parent processes in system mode = %ld ms\n", parentusage->ru_stime.tv_usec);
-
     float difftime = (end.tv_nsec - start.tv_nsec) / 1000000.0 + (end.tv_sec - start.tv_sec) * 1000.0;
+    times(&t);
+    printf("            user time           system time\n");
+    printf("parent:    %f        %f\n",
+           ((double)t.tms_utime) / tics_per_second,
+           ((double)t.tms_stime) / tics_per_second);
+    printf("child:     %f        %f\n",
+           ((double)t.tms_cutime) / tics_per_second,
+           ((double)t.tms_cstime) / tics_per_second);
     printf("Total elapse time measured by the process = %.3f ms\n", difftime);
-
     printf("Draw the image\n");
-    DrawImage(pixels, IMAGE_WIDTH, IMAGE_HEIGHT, "Mandelbrot demo", 10000);
+    DrawImage(pixels, IMAGE_WIDTH, IMAGE_HEIGHT, "Mandelbrot demo", 3000);
     return 0;
 }
